@@ -127,7 +127,7 @@ def data_processing(mode, jsonc=None, quality="large"):
 if __name__ == "__main__":
     try:
         mode = str(input("请输入下载的模式(search,ranking):"))
-        mode_list = ["seach", "ranking"]
+        mode_list = ["search", "ranking"]
         if mode not in mode_list:
             raise PixivCatcherError("错误的模式")
         if mode == "search":
