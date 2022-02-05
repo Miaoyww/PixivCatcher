@@ -12,4 +12,9 @@
     2.使用多线程下载图片
     3.待补充
 
+
 声明:本爬虫仅供学习，禁止于商业用途
+
+感谢:
+
+pixivpy:https://github.com/upbit/pixivpy
