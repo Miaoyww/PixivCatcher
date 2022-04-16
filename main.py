@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 from pixivpy3 import *
 from requests.packages import urllib3
 import threading
@@ -7,7 +9,7 @@ import json
 import time
 import os
 import re
-
+import sys
 
 urllib3.disable_warnings()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -23,27 +25,40 @@ class PixivCatcherError(Exception):
     pass
 
 
-class PixivCatcher:
-    def __init__(self):
-        self.header = {
-            'User-Agent': 'Mozilla/5.0',
-            'Referer': 'https://www.pixiv.net/',
-            'Accept-Language': 'zh_cn'
-        }
+download_header = {
+    'User-Agent': 'Mozilla/5.0',
+    'Referer': 'https://www.pixiv.net/',
+    'Accept-Language': 'zh_cn'
+}
 
-    def download(self, name, url):
-        logging.info("PixivCatcher.download(): 正在下载%s" % name)
+
+def download(name, url):
+    if not os.path.exists("image/" + name):    
         while True:
+            logging.info("download(): 开始下载 %s" % name)
             try:
-                res = requests.get(url, headers=self.header, verify=False)
+                res = requests.get(url, headers=download_header, verify=False)
                 with open("image/" + name, 'wb+') as w:
                     w.write(res.content)
-                logging.info("PixivCatcher.download(): %s下载完成" % name)
-            except Exception as download_error:
-                logging.error(f"PixivCatcher.download(): 即将重新下载%s,因为%s" % (name, download_error))
+                logging.info("download(): %s下载完成" % name)
+            except FileNotFoundError:
+                os.mkdir("image")
+                logging.info("download(): 创建image文件夹")
                 continue
-            else:
-                break
+            except KeyboardInterrupt:
+                logging.info("download(): 终止程序")
+                os._exit(0)
+            except Exception as download_error:
+                logging.error(f"download(): 即将重新下载%s,因为%s" % (name, download_error))
+                continue
+            finally:
+                if not os.path.exists("image/" + name):
+                    logging.error("download(): 即将重新下载%s,因为文件不存在" % name)
+                    continue
+                else:
+                    break
+    else:
+        logging.info("download(): %s已存在, 跳过下载" % name)
 
 
 def set_default_config():
@@ -61,7 +76,7 @@ def set_default_config():
         }
     }
     with open("config.json", "w") as w:
-        w.write(json.dumps(default_config))
+        w.write(json.dumps(default_config, sort_keys=True, indent=4, separators=(',', ':')))
 
 
 def login(refresh_token="0zeYA-PllRYp1tfrsq_w3vHGU1rPy237JMf5oDt73c4"):
@@ -126,8 +141,11 @@ def data_processing(mode, jsonc=None, quality="large"):
 
         result = []
         for id_item, title_item, url_item in zip(artword_id, artword_title, artword_url):
-            result.append(["%s_%s.jpg" % (title_item, id_item), url_item])
-        return result
+            thread_ = threading.Thread(
+                target=download(f"{title_item}_{id_item}.jpg", url_item)
+            )
+            thread_.start()
+
     if mode == "ranking":
         artwork_id = [item['illust_id'] for item in jsonc['contents']]
         artwork_title = [re.sub('[/:*?"<>|]', '-', item['title']) for item in jsonc['contents']]
@@ -140,24 +158,66 @@ def data_processing(mode, jsonc=None, quality="large"):
                 try:
                     res = requests.get(f"https://www.pixiv.net/artworks/{id_item}", headers=header, verify=False)
                 except Exception as data_processing_error:
-                    logging.error("data_processing(): 获取排行榜作品详情错误,0.5秒后重试:target:%s,error:%s" % (title_item, data_processing_error))
+                    logging.error("data_processing(): 获取排行榜作品详情错误,0.5秒后重试:target:%s,error:%s" % (
+                        title_item, data_processing_error))
                     continue
                 else:
-                    artwork_url.append(re.findall(r'"original":"(.+?)"', res.text)[0])
+                    # artwork_url.append(re.findall(r'"original":"(.+?)"', res.text)[0])
+                    threading.Thread(
+                        target=download(f"{title_item}.jpg", re.findall(r'"original":"(.+?)"', res.text)[0])
+                    ).start()
                     break
-        result = []
-        for id_item, title_item, url_item in zip(artwork_id, artwork_title, artwork_url):
-            result.append(["%s_%s.jpg" % (title_item, id_item), url_item])
-        return result
+
+
+def search_mode():
+    search_keyword = config['search_config']['search_keyword']
+    search_target = config['search_config']['search_target']
+    search_sort = config['search_config']['search_sort']
+    if search_target not in search_target_list:
+        raise PixivCatcherError("main: 未知的搜索类型 %s" % search_target)
+    if search_sort not in search_sort_list:
+        raise PixivCatcherError("main: 未知的搜索顺序 %s" % search_sort)
+    logging.info("main: 初始化完毕")
+    logging.info("main: 当前搜索关键词: %s" % search_keyword)
+    logging.info("main: 当前搜索类型: %s" % search_target)
+    logging.info("main: 当前搜索顺序: %s" % search_sort)
+    logging.info("main: 开始搜索")
+    threading.Thread(target=data_processing("search", search(login(), search_keyword))).start()
+
+
+def ranking_mode():
+    ranking_mode = config['ranking_config']['ranking_mode']
+    ranking_goon = config['ranking_config']['ranking_goon']
+    try:
+        ranking_start_page = int(config['ranking_config']['ranking_start_page'])
+    except TypeError as ranking_start_page_error:
+        raise PixivCatcherError("main: 类型错误,ranking_start_page应填正整数int类型 %s" % ranking_start_page_error)
+    if type(ranking_goon) != bool:
+        raise PixivCatcherError("main: 类型错误,ranking_goon应填bool值 %s" % ranking_goon)
+    logging.info("main: 初始化完毕")
+    logging.info("main: 当前排行榜模式: %s" % ranking_mode)
+    logging.info("main: 当前排行榜初始页数: %s" % ranking_start_page)
+    logging.info("main: 当前排行榜翻页功能: %s" % ranking_goon)
+    logging.info("main: 开始获取排行榜信息")
+    while True:
+        try:
+            threading.Thread(target=data_processing("ranking", jsonc=ranking(mode=ranking_mode, page_num=ranking_start_page))).start()
+        except requests.exceptions.ConnectionError as ranking_error:
+            logging.error("main: 获取排行榜信息失败,0.5秒后重试\nerror%s" % ranking_error)
+            time.sleep(0.5)
+            continue
 
 
 if __name__ == "__main__":
-    if os.path.exists("config.json"):
-        with open("config.json") as r:
-            config = json.loads(r.read())
-        '''
-            当前模式都是写死的，不可修改
-        '''
+    if not os.path.exists("config.json"):
+        set_default_config()
+        logging.info("main: 未找到配置文件,正在创建配置文件,是否按照默认配置开始爬取?(y/n)")
+        if input() == "y":
+            pass
+        else:
+            exit()
+    with open("config.json") as r:
+        config = json.loads(r.read())
         start_mode_list = ["search", "ranking"]
         search_target_list = ["partial_match_for_tags", "exact_match_for_tags", "title_and_caption"]
         search_sort_list = ["date_desc", "date_asc", "popular_desc"]
@@ -170,57 +230,10 @@ if __name__ == "__main__":
             logging.info("main: 当前启动模式%s" % start_mode)
             logging.info("main: 正在加载配置")
             if start_mode == "search":
-                search_keyword = config['search_config']['search_keyword']
-                search_target = config['search_config']['search_target']
-                search_sort = config['search_config']['search_sort']
-                if search_target not in search_target_list:
-                    raise PixivCatcherError("main: 未知的搜索类型 %s" % search_target)
-                if search_sort not in search_sort_list:
-                    raise PixivCatcherError("main: 未知的搜索顺序 %s" % search_sort)
-                logging.info("main: 初始化完毕")
-                logging.info("main: 当前搜索关键词: %s" % search_keyword)
-                logging.info("main: 当前搜索类型: %s" % search_target)
-                logging.info("main: 当前搜索顺序: %s" % search_sort)
-                logging.info("main: 开始搜索")
-                search_result = data_processing("search", search(login(), search_keyword))
-                logging.info("main: 获取完毕,开始下载")
-                for info_item in search_result:
-                    d = PixivCatcher()
-                    '''thread_ = threading.Thread(target=d.download(info_item[0], info_item[1]))
-                    thread_.start()
-                    thread_.join()'''
-                    d.download(info_item[0], info_item[1])
+                search_mode()
             if start_mode == "ranking":
-                ranking_mode = config['ranking_config']['ranking_mode']
-                ranking_goon = config['ranking_config']['ranking_goon']
-                try:
-                    ranking_start_page = int(config['ranking_config']['ranking_start_page'])
-                except TypeError as ranking_start_page_error:
-                    raise PixivCatcherError("main: 类型错误,ranking_start_page应填正整数int类型 %s" % ranking_start_page_error)
-                if type(ranking_goon) != bool:
-                    raise PixivCatcherError("main: 类型错误,ranking_goon应填bool值 %s" % ranking_goon)
-                logging.info("main: 初始化完毕")
-                logging.info("main: 当前排行榜模式: %s" % ranking_mode)
-                logging.info("main: 当前排行榜初始页数: %s" % ranking_start_page)
-                logging.info("main: 当前排行榜翻页功能: %s" % ranking_goon)
-                logging.info("main: 开始获取排行榜信息")
-                while True:
-                    try:
-                        ranking_result = data_processing("ranking", jsonc=ranking(mode=ranking_mode, page_num=ranking_start_page))
-                    except Exception as errors:
-                        logging.error("main: 获取排行榜错误,重试中:%s" % errors)
-                        time.sleep(0.5)
-                        continue
-                    else:
-                        logging.info("main: 获取完毕, 开始下载第%s页的内容" % ranking_start_page)
-                        for info_item in ranking_result:
-                            d = PixivCatcher()
-                            '''thread_ = threading.Thread(target=d.download(info_item[0], info_item[1]))
-                            thread_.start()
-                            thread_.join()'''
-                            d.download(info_item[0], info_item[1])
-                        if ranking_goon:
-                            ranking_start_page += 1
-                            continue
-                        else:
-                            break
+                ranking_mode()
+
+        logging.info("main: 完成")
+        time.sleep(2)
+        quit(0)

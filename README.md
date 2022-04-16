@@ -26,17 +26,17 @@
 在每次启动时,程序会检测是否含有config.json文件,如果没有,将视为首次启动并将创建一个内容如下的json文件
 
     {
-        "start_mode": "ranking",
-        "search_config": {
-            "search_keyword": "Hutao",
-            "search_target": "partial_match_for_tags",
-            "search_sort": "date_desc"
+        "ranking_config":{
+            "ranking_goon":false,
+            "ranking_mode":"daily",
+            "ranking_start_page":1
         },
-        "ranking_config": {
-            "ranking_mode": "daily",
-            "ranking_goon": False,
-            "ranking_start_page": 1,
-        }
+        "search_config":{
+            "search_keyword":"Hutao",
+            "search_sort":"date_desc",
+            "search_target":"partial_match_for_tags"
+        },
+        "start_mode":"ranking"
     }
 
 |       名称       |                                                          说明                                                           |
